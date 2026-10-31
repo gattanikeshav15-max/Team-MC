@@ -45,8 +45,10 @@ Synthesize a technical reliability response based on this retrieved knowledge:`;
     // 1. If Gemini API Key is configured, execute live LLM inference
     if (apiKey && apiKey !== 'YOUR_GEMINI_API_KEY_HERE') {
       try {
+        // Use models/ prefix as required by newer Gemini API versions
+        const modelPath = model.startsWith('models/') ? model : `models/${model}`;
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${apiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -124,3 +126,4 @@ VAJRA does not fabricate telemetry data. If this relates to a newly observed com
 };
 
 export default aiService;
+

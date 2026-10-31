@@ -72,12 +72,12 @@ export const embeddingService = {
     if (apiKey && apiKey !== 'YOUR_GEMINI_API_KEY_HERE') {
       try {
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${apiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              model: 'models/text-embedding-004',
+              model: 'models/gemini-embedding-001',
               content: { parts: [{ text }] },
             }),
           }
@@ -88,7 +88,7 @@ export const embeddingService = {
           if (data?.embedding?.values) {
             return {
               embedding: data.embedding.values,
-              model: 'gemini-text-embedding-004',
+              model: 'gemini-embedding-001',
               dimension: data.embedding.values.length,
             };
           }
@@ -129,3 +129,4 @@ export const embeddingService = {
 };
 
 export default embeddingService;
+
