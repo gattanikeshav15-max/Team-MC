@@ -249,3 +249,4 @@ export default function IncidentDetails() {
     </div>
   );
 }
+
