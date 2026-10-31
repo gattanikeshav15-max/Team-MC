@@ -28,6 +28,23 @@ app.use(express.urlencoded({ extended: true }));
 // Serve uploaded documents statically
 app.use('/uploads', express.static(path.resolve('uploads')));
 
+// Root route friendly redirect / info
+app.get('/', (req, res) => {
+  res.send(`
+    <html>
+      <head><title>SiliconSentinel Backend</title></head>
+      <body style="font-family: sans-serif; background: #020617; color: #f8fafc; padding: 40px; text-align: center;">
+        <h1 style="color: #38bdf8;">SiliconSentinel & VAJRA API Gateway</h1>
+        <p style="color: #94a3b8;">The backend API is running on port 5000.</p>
+        <p>To view the web platform, click below:</p>
+        <a href="http://localhost:5174" style="display: inline-block; background: #06b6d4; color: #020617; font-weight: bold; padding: 12px 24px; border-radius: 8px; text-decoration: none; margin-top: 10px;">
+          Open Frontend (http://localhost:5174) &rarr;
+        </a>
+      </body>
+    </html>
+  `);
+});
+
 // Health & Diagnostics
 app.get('/api/health', (req, res) => {
   const db = getDBStatus();
@@ -65,7 +82,7 @@ app.post('/api/seed', runSeed);
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: `Endpoint ${req.method} ${req.originalUrl} not found.`,
+    message: `Endpoint ${req.method} ${req.originalUrl} not found. View the UI at http://localhost:5174`,
   });
 });
 
