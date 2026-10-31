@@ -12,3 +12,4 @@ router.put('/:id', protect, updateComponent);
 router.delete('/:id', protect, deleteComponent);
 
 export default router;
+

@@ -1,107 +1,210 @@
 import Memory from '../models/Memory.js';
-import Component from '../models/Component.js';
+import Project from '../models/Project.js';
+import Document from '../models/Document.js';
 import embeddingService from '../services/embeddingService.js';
-import { inMemoryStore } from '../utils/inMemoryStore.js';
+import documentProcessingService from '../services/documentProcessingService.js';
 import mongoose from 'mongoose';
+
+const VALID_CATEGORIES = [
+  'Research Objective',
+  'Observation',
+  'Successful Experiment',
+  'Failed Experiment',
+  'Engineering Decision',
+  'Technical Limitation',
+  'Lesson Learned',
+  'Unresolved Question',
+];
 
 export class MemoryExtractionAgent {
   /**
-   * Autonomous Memory Extraction from Incident or Engineering Telemetry
+   * Extract research memories from an uploaded document
    */
-  static async extractFromIncident(incidentData) {
-    const componentId = incidentData.componentId;
-    let component = null;
-
+  static async extractFromDocument({ documentId, filePath, fileType, originalFilename, projectId }) {
+    // 1. Fetch Project Details
+    let project = null;
     if (mongoose.connection.readyState === 1) {
-      component = await Component.findOne({ id: componentId });
-    } else {
-      component = inMemoryStore.components.find((c) => c.id === componentId);
+      project = await Project.findOne({ id: projectId });
     }
 
-    const componentName = component ? component.name : incidentData.componentName || 'Semiconductor Part';
+    const projectName = project ? project.name : 'Semiconductor Research';
+    const teamName = project ? project.teamName : 'Team Alpha';
 
-    // 1. Classify Category based on Failure Mode & Symptoms
-    let memoryType = 'Observation Memory';
-    let importance = 'Medium';
-    let confidence = 82;
+    // 2. Extract Plain Text from File
+    const fullText = await documentProcessingService.extractText(filePath, fileType, originalFilename);
+    const chunks = documentProcessingService.chunkText(fullText);
 
-    const symptomsLower = (incidentData.symptoms || '').toLowerCase();
-    const titleLower = (incidentData.title || '').toLowerCase();
-    const descLower = (incidentData.description || '').toLowerCase();
-    const combined = `${symptomsLower} ${titleLower} ${descLower}`;
+    const extractedMemories = [];
 
-    if (incidentData.severity === 'Critical' || combined.includes('latchup') || combined.includes('sel') || combined.includes('breakdown')) {
-      memoryType = 'Failure Memory';
-      importance = 'Critical';
-      confidence = 94;
-    } else if (combined.includes('moisture') || combined.includes('vacuum') || combined.includes('cryo') || combined.includes('radiation') || combined.includes('thermal')) {
-      memoryType = 'Environmental Memory';
-      importance = 'High';
-      confidence = 88;
-    } else if (combined.includes('snubber') || combined.includes('capacitor') || combined.includes('mitigation') || combined.includes('derating')) {
-      memoryType = 'Decision Memory';
-      importance = 'High';
-      confidence = 91;
-    }
+    // 3. Process each chunk into structured research findings
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const findings = this.classifyChunkContent(chunk.text, chunk.section);
 
-    // 2. Synthesize concise factual heuristic content
-    const memoryContent = `Anomaly on ${componentName} (${componentId}): ${incidentData.title}. Telemetry signature: ${incidentData.symptoms || 'None recorded'}. Operational conditions: ${incidentData.environmentalConditions || 'Standard'}. Circuit outcome: ${incidentData.outcome || incidentData.description}`;
+      for (const finding of findings) {
+        const memoryId = `MEM-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
 
-    // 3. Generate Vector Embedding
-    const { embedding } = await embeddingService.generateEmbedding(
-      `${componentName} ${componentId} ${memoryType} ${memoryContent}`
-    );
+        // Generate vector embedding for semantic search
+        const { embedding } = await embeddingService.generateEmbedding(
+          `${finding.category}: ${finding.content} | Context: ${projectName} ${teamName}`
+        );
 
-    const memoryId = `MEM-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
+        const memoryDoc = {
+          id: memoryId,
+          projectId,
+          projectName,
+          teamName,
+          documentId,
+          documentName: originalFilename,
+          category: finding.category,
+          content: finding.content,
+          sourceSection: chunk.section || `Section ${i + 1}`,
+          verificationStatus: finding.confidence > 90 ? 'Verified' : 'Unverified',
+          confidence: finding.confidence,
+          embedding,
+          tags: [finding.category, teamName, pathSafe(projectName)],
+          verifiedBy: 'Pending Peer Review',
+          createdDate: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        };
 
-    const newMemoryDoc = {
-      id: memoryId,
-      componentId,
-      componentName,
-      systemId: incidentData.systemId || component?.systemId || '',
-      type: memoryType,
-      category: memoryType,
-      content: memoryContent,
-      sourceType: 'Incident',
-      sourceId: incidentData.id,
-      source: `${incidentData.id} / Autonomous VAJRA Extraction`,
-      confidence,
-      importance,
-      verificationStatus: 'Unverified', // Crucial rule: new autonomous extractions begin as Unverified
-      embedding,
-      tags: [incidentData.severity, memoryType.replace(' Memory', ''), 'Autonomous-Extraction'],
-      verifiedBy: 'Pending Peer Review',
-      notes: `Extracted automatically from ${incidentData.id}. Requires Level-3 engineer verification before flight certification.`,
-      correctionAuditTrail: [],
-      createdDate: new Date().toISOString().replace('T', ' ').substring(0, 19),
-    };
-
-    // 4. Check for duplicate memory
-    let savedMemory;
-    if (mongoose.connection.readyState === 1) {
-      const existing = await Memory.findOne({
-        componentId,
-        sourceId: incidentData.id,
-      });
-
-      if (existing) {
-        return { memory: existing, isDuplicate: true };
+        if (mongoose.connection.readyState === 1) {
+          const saved = await Memory.create(memoryDoc);
+          extractedMemories.push(saved);
+        } else {
+          extractedMemories.push(memoryDoc);
+        }
       }
+    }
 
-      savedMemory = await Memory.create(newMemoryDoc);
-    } else {
-      const existing = inMemoryStore.memories.find(
-        (m) => m.componentId === componentId && m.sourceId === incidentData.id
+    // 4. Update Document extracted count and status
+    if (mongoose.connection.readyState === 1) {
+      await Document.findOneAndUpdate(
+        { id: documentId },
+        {
+          processingStatus: 'Extracted',
+          extractedMemoriesCount: extractedMemories.length,
+        }
       );
-      if (existing) {
-        return { memory: existing, isDuplicate: true };
-      }
-      inMemoryStore.memories.unshift(newMemoryDoc);
-      savedMemory = newMemoryDoc;
     }
 
-    return { memory: savedMemory, isDuplicate: false };
+    return extractedMemories;
   }
+
+  /**
+   * Deterministic Semantic Rule-Based & Keyword Research Classifier
+   */
+  static classifyChunkContent(text, defaultSection = 'Research Summary') {
+    const findings = [];
+    const lower = text.toLowerCase();
+    const sentences = text.split(/(?<=[.?!])\s+/).filter((s) => s.trim().length > 30);
+
+    for (const sent of sentences) {
+      const sLower = sent.toLowerCase();
+
+      // Successful Experiment
+      if (
+        sLower.includes('achieved') ||
+        sLower.includes('successful') ||
+        sLower.includes('confirmed that') ||
+        sLower.includes('demonstrated') ||
+        sLower.includes('passed all') ||
+        sLower.includes('optimal result')
+      ) {
+        findings.push({
+          category: 'Successful Experiment',
+          content: sent.trim(),
+          confidence: 94,
+        });
+      }
+      // Failed Experiment
+      else if (
+        sLower.includes('failed') ||
+        sLower.includes('breakdown') ||
+        sLower.includes('thermal runaway') ||
+        sLower.includes('degradation') ||
+        sLower.includes('did not meet') ||
+        sLower.includes('damage') ||
+        sLower.includes('latchup')
+      ) {
+        findings.push({
+          category: 'Failed Experiment',
+          content: sent.trim(),
+          confidence: 95,
+        });
+      }
+      // Technical Limitation
+      else if (
+        sLower.includes('limited to') ||
+        sLower.includes('maximum boundary') ||
+        sLower.includes('cannot exceed') ||
+        sLower.includes('restricted by') ||
+        sLower.includes('bottleneck')
+      ) {
+        findings.push({
+          category: 'Technical Limitation',
+          content: sent.trim(),
+          confidence: 90,
+        });
+      }
+      // Engineering Decision
+      else if (
+        sLower.includes('we decided') ||
+        sLower.includes('selected') ||
+        sLower.includes('adopted') ||
+        sLower.includes('standardized on') ||
+        sLower.includes('mandated')
+      ) {
+        findings.push({
+          category: 'Engineering Decision',
+          content: sent.trim(),
+          confidence: 92,
+        });
+      }
+      // Lesson Learned
+      else if (
+        sLower.includes('lesson') ||
+        sLower.includes('recommend') ||
+        sLower.includes('in future') ||
+        sLower.includes('must ensure') ||
+        sLower.includes('crucial that')
+      ) {
+        findings.push({
+          category: 'Lesson Learned',
+          content: sent.trim(),
+          confidence: 88,
+        });
+      }
+      // Unresolved Question
+      else if (
+        sLower.includes('unclear') ||
+        sLower.includes('requires further') ||
+        sLower.includes('unknown') ||
+        sLower.includes('open question') ||
+        sLower.includes('to be investigated')
+      ) {
+        findings.push({
+          category: 'Unresolved Question',
+          content: sent.trim(),
+          confidence: 85,
+        });
+      }
+    }
+
+    // If no specific patterns triggered, extract top sentence as Observation
+    if (findings.length === 0 && sentences.length > 0) {
+      findings.push({
+        category: 'Observation',
+        content: sentences[0].trim(),
+        confidence: 82,
+      });
+    }
+
+    return findings.slice(0, 5); // Limit per chunk to prevent clutter
+  }
+}
+
+function pathSafe(str) {
+  return (str || '').replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
 }
 
 export default MemoryExtractionAgent;

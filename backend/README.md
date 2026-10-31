@@ -149,3 +149,4 @@ To enable semantic retrieval via MongoDB Atlas Vector Search:
 - `GET /api/health` — Atlas connection status, Gemini status, and vector index health
 - `GET /api/stats` — Fleet totals and memory verification ratios
 - `POST /api/seed` — Seed initial semiconductor baseline dataset
+

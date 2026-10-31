@@ -111,3 +111,4 @@ if (process.argv[1]?.includes('seeder.js')) {
 }
 
 export default seedDatabase;
+

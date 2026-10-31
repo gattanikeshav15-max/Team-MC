@@ -1,15 +1,5 @@
 import mongoose from 'mongoose';
 
-const auditEntrySchema = new mongoose.Schema(
-  {
-    previousContent: { type: String, required: true },
-    reason: { type: String, required: true },
-    correctedBy: { type: String, default: 'Keshav Gattani' },
-    timestamp: { type: String, default: () => new Date().toISOString() },
-  },
-  { _id: false }
-);
-
 const memorySchema = new mongoose.Schema(
   {
     id: {
@@ -19,66 +9,51 @@ const memorySchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
-    systemId: {
+    projectId: {
+      type: String,
+      required: true,
+      ref: 'Project',
+      index: true,
+    },
+    projectName: {
+      type: String,
+      default: '',
+    },
+    teamName: {
+      type: String,
+      default: '',
+    },
+    documentId: {
       type: String,
       default: '',
       index: true,
     },
-    componentId: {
-      type: String,
-      required: true,
-      ref: 'Component',
-      index: true,
-    },
-    componentName: {
+    documentName: {
       type: String,
       default: '',
-    },
-    type: {
-      type: String,
-      required: true,
-      enum: [
-        'Observation Memory',
-        'Failure Memory',
-        'Maintenance Memory',
-        'Environmental Memory',
-        'Decision Memory',
-        'Outcome Memory',
-      ],
-      index: true,
     },
     category: {
       type: String,
-      default: function () {
-        return this.type;
-      },
+      required: true,
+      enum: [
+        'Research Objective',
+        'Observation',
+        'Successful Experiment',
+        'Failed Experiment',
+        'Engineering Decision',
+        'Technical Limitation',
+        'Lesson Learned',
+        'Unresolved Question',
+      ],
+      index: true,
     },
     content: {
       type: String,
       required: [true, 'Memory content text is mandatory'],
     },
-    sourceType: {
+    sourceSection: {
       type: String,
-      default: 'Incident',
-    },
-    sourceId: {
-      type: String,
-      default: '',
-    },
-    source: {
-      type: String,
-      default: '',
-    },
-    confidence: {
-      type: Number,
-      default: 85,
-      min: 0,
-      max: 100,
-    },
-    importance: {
-      type: String,
-      enum: ['Critical', 'High', 'Medium', 'Low'],
-      default: 'High',
+      default: 'Section 1.0',
     },
     verificationStatus: {
       type: String,
@@ -86,10 +61,16 @@ const memorySchema = new mongoose.Schema(
       default: 'Unverified',
       index: true,
     },
+    confidence: {
+      type: Number,
+      default: 88,
+      min: 0,
+      max: 100,
+    },
     embedding: {
       type: [Number],
       default: [],
-      select: true, // Retain embedding array for vector cosine distance calculations
+      select: true,
     },
     tags: {
       type: [String],
@@ -99,18 +80,9 @@ const memorySchema = new mongoose.Schema(
       type: String,
       default: 'Pending Peer Review',
     },
-    notes: {
-      type: String,
-      default: '',
-    },
-    correctionAuditTrail: [auditEntrySchema],
     createdDate: {
       type: String,
       default: () => new Date().toISOString().replace('T', ' ').substring(0, 19),
-    },
-    expiresAt: {
-      type: Date,
-      default: null, // TTL expiration for transient observation memories
     },
   },
   {
@@ -118,8 +90,7 @@ const memorySchema = new mongoose.Schema(
   }
 );
 
-// MongoDB Text index for fallback hybrid keyword search
-memorySchema.index({ content: 'text', componentName: 'text', tags: 'text' });
+memorySchema.index({ content: 'text', category: 'text', tags: 'text' });
 
 export const Memory = mongoose.model('Memory', memorySchema);
 export default Memory;

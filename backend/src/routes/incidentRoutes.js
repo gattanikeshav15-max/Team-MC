@@ -12,3 +12,4 @@ router.put('/:id', protect, updateIncident);
 router.get('/:id/analysis', protect, analyzeIncident);
 
 export default router;
+

@@ -44,3 +44,4 @@ const maintenanceSchema = new mongoose.Schema(
 
 export const Maintenance = mongoose.model('Maintenance', maintenanceSchema);
 export default Maintenance;
+

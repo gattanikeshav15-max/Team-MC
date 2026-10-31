@@ -8,3 +8,4 @@ router.get('/', getMaintenanceLogs);
 router.post('/', protect, createMaintenanceLog);
 
 export default router;
+

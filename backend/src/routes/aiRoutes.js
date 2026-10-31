@@ -1,12 +1,10 @@
 import express from 'express';
-import { chat, getConversations, getConversationById, submitFeedback } from '../controllers/aiController.js';
-import { protect } from '../middleware/auth.js';
+import { chat, getConversations, getConversationById } from '../controllers/aiController.js';
 
 const router = express.Router();
 
-router.post('/chat', protect, chat);
-router.get('/conversations', protect, getConversations);
-router.get('/conversations/:id', protect, getConversationById);
-router.post('/feedback', protect, submitFeedback);
+router.post('/chat', chat);
+router.get('/conversations', getConversations);
+router.get('/conversations/:id', getConversationById);
 
 export default router;

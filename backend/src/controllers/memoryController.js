@@ -1,20 +1,16 @@
 import Memory from '../models/Memory.js';
-import Incident from '../models/Incident.js';
-import MemoryExtractionAgent from '../agents/MemoryExtractionAgent.js';
+import Project from '../models/Project.js';
 import MemoryRetrievalAgent from '../agents/MemoryRetrievalAgent.js';
-import MemoryManagementAgent from '../agents/MemoryManagementAgent.js';
-import { inMemoryStore } from '../utils/inMemoryStore.js';
 import mongoose from 'mongoose';
 
 export const getMemories = async (req, res) => {
   try {
-    const { category, type, verificationStatus, componentId, search } = req.query;
+    const { category, projectId, verificationStatus, search } = req.query;
     const filter = {};
 
-    const targetType = category || type;
-    if (targetType && targetType !== 'All') filter.type = targetType;
+    if (category && category !== 'All') filter.category = category;
+    if (projectId && projectId !== 'All') filter.projectId = projectId;
     if (verificationStatus && verificationStatus !== 'All') filter.verificationStatus = verificationStatus;
-    if (componentId && componentId !== 'All') filter.componentId = componentId;
 
     if (mongoose.connection.readyState === 1) {
       if (search) {
@@ -24,52 +20,7 @@ export const getMemories = async (req, res) => {
       return res.status(200).json(memories);
     }
 
-    let result = inMemoryStore.memories;
-    if (targetType && targetType !== 'All') result = result.filter((m) => m.type === targetType);
-    if (verificationStatus && verificationStatus !== 'All') result = result.filter((m) => m.verificationStatus === verificationStatus);
-    if (componentId && componentId !== 'All') result = result.filter((m) => m.componentId === componentId);
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (m) =>
-          m.content.toLowerCase().includes(q) ||
-          m.id.toLowerCase().includes(q) ||
-          m.componentId.toLowerCase().includes(q) ||
-          m.tags?.some((t) => t.toLowerCase().includes(q))
-      );
-    }
-
-    return res.status(200).json(result);
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-export const extractMemory = async (req, res) => {
-  try {
-    const { incidentId, incidentData } = req.body;
-    let targetIncident = incidentData;
-
-    if (!targetIncident && incidentId) {
-      if (mongoose.connection.readyState === 1) {
-        targetIncident = await Incident.findOne({ id: incidentId });
-      } else {
-        targetIncident = inMemoryStore.incidents.find((i) => i.id === incidentId);
-      }
-    }
-
-    if (!targetIncident) {
-      return res.status(400).json({ success: false, message: 'Valid incidentId or incidentData is required' });
-    }
-
-    const { memory, isDuplicate } = await MemoryExtractionAgent.extractFromIncident(targetIncident);
-
-    return res.status(201).json({
-      success: true,
-      memory,
-      isDuplicate,
-      message: isDuplicate ? 'Existing memory verified; duplicate creation skipped.' : 'New agentic memory extracted.',
-    });
+    return res.status(200).json([]);
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -77,7 +28,7 @@ export const extractMemory = async (req, res) => {
 
 export const searchMemories = async (req, res) => {
   try {
-    const { query, componentId, systemId, limit = 5, minScore = 0.45 } = req.body;
+    const { query, projectId, limit = 5, minScore = 0.25 } = req.body;
 
     if (!query) {
       return res.status(400).json({ success: false, message: 'Search query string is required' });
@@ -85,8 +36,7 @@ export const searchMemories = async (req, res) => {
 
     const retrievalResult = await MemoryRetrievalAgent.retrieve({
       query,
-      componentId,
-      systemId,
+      projectId,
       limit: Number(limit),
       minScore: Number(minScore),
     });
@@ -107,40 +57,15 @@ export const searchMemories = async (req, res) => {
 export const updateMemory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { action, verificationStatus, content, reason, engineerName } = req.body;
-    const author = engineerName || req.user?.name || 'Keshav Gattani';
+    const update = req.body;
 
-    let result;
-
-    if (action === 'verify' || verificationStatus === 'Verified') {
-      result = await MemoryManagementAgent.verify(id, author);
-    } else if (action === 'unverify' || verificationStatus === 'Unverified') {
-      result = await MemoryManagementAgent.unverify(id);
-    } else if (action === 'correct' || verificationStatus === 'Corrected' || (content && reason)) {
-      result = await MemoryManagementAgent.correct(id, {
-        newContent: content,
-        reason: reason || 'Technical heuristic precision correction',
-        engineerName: author,
-      });
-    } else if (action === 'archive' || verificationStatus === 'Archived') {
-      result = await MemoryManagementAgent.archive(id);
-    } else {
-      // General field update
-      if (mongoose.connection.readyState === 1) {
-        result = await Memory.findOneAndUpdate({ id }, req.body, { new: true });
-      } else {
-        const mem = inMemoryStore.memories.find((m) => m.id === id);
-        if (!mem) return res.status(404).json({ success: false, message: `Memory ${id} not found` });
-        Object.assign(mem, req.body);
-        result = mem;
-      }
+    if (mongoose.connection.readyState === 1) {
+      const updated = await Memory.findOneAndUpdate({ id }, update, { new: true });
+      if (!updated) return res.status(404).json({ success: false, message: 'Memory not found' });
+      return res.status(200).json({ success: true, memory: updated });
     }
 
-    return res.status(200).json({
-      success: true,
-      memory: result,
-      message: `Memory ${id} status updated successfully.`,
-    });
+    return res.status(404).json({ success: false, message: 'Database disconnected' });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -149,8 +74,11 @@ export const updateMemory = async (req, res) => {
 export const deleteMemory = async (req, res) => {
   try {
     const { id } = req.params;
-    await MemoryManagementAgent.delete(id);
-    return res.status(200).json({ success: true, message: `Memory ${id} purged from persistent store.` });
+    if (mongoose.connection.readyState === 1) {
+      await Memory.deleteOne({ id });
+      return res.status(200).json({ success: true, message: `Memory ${id} deleted` });
+    }
+    return res.status(200).json({ success: true });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }

@@ -60,3 +60,4 @@ const systemSchema = new mongoose.Schema(
 
 export const System = mongoose.model('System', systemSchema);
 export default System;
+
