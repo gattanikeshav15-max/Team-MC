@@ -1,10 +1,11 @@
 import express from 'express';
-import { chat, getConversations, getConversationById } from '../controllers/aiController.js';
+import { chat, getProjectChats, createChat, getConversationById } from '../controllers/aiController.js';
 
 const router = express.Router();
 
 router.post('/chat', chat);
-router.get('/conversations', getConversations);
+router.post('/chats', createChat);
+router.get('/projects/:projectId/chats', getProjectChats);
 router.get('/conversations/:id', getConversationById);
 
 export default router;

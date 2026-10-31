@@ -5,10 +5,14 @@ import mongoose from 'mongoose';
 
 export const chat = async (req, res) => {
   try {
-    const { message, conversationId, currentProjectId } = req.body;
+    const { message, conversationId, projectId } = req.body;
 
     if (!message || !message.trim()) {
       return res.status(400).json({ success: false, message: 'Message text is required' });
+    }
+
+    if (!projectId) {
+      return res.status(400).json({ success: false, message: 'projectId is mandatory for every chat.' });
     }
 
     const convId = conversationId || `conv-${Date.now()}`;
@@ -20,7 +24,7 @@ export const chat = async (req, res) => {
     const retrievalResult = await MemoryRetrievalAgent.retrieve({
       query: message,
       limit: 4,
-      minScore: 0.25,
+      minScore: 0.22,
     });
 
     const retrievedMemories = retrievalResult.results || [];
@@ -37,7 +41,7 @@ export const chat = async (req, res) => {
         : 'NO PREVIOUS RESEARCH EXPERIMENTS FOUND IN VAJRA MEMORY REPOSITORY.';
 
     const systemPrompt = `You are VAJRA, the AI-powered persistent engineering memory engine of SiliconSentinel.
-Your purpose: Enable new research teams (Team B) to reuse verified findings, avoid repeating failed experiments, and respect technical limitations from previous research projects (Team A).
+Your purpose: Enable new research teams to reuse verified findings, avoid repeating failed experiments, and respect technical limitations from previous research projects.
 
 CRITICAL INSTRUCTIONS:
 1. Base your answer STRICTLY on the retrieved research findings and documents cited below.
@@ -63,11 +67,15 @@ Synthesize a concise, clear knowledge-transfer answer for the research team:`;
     if (apiKey && apiKey !== 'YOUR_GEMINI_API_KEY_HERE') {
       try {
         const modelPath = model.startsWith('models/') ? model : `models/${model}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 second fail-fast timeout
+
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${apiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
             body: JSON.stringify({
               contents: [
                 {
@@ -82,6 +90,7 @@ Synthesize a concise, clear knowledge-transfer answer for the research team:`;
             }),
           }
         );
+        clearTimeout(timeoutId);
 
         if (response.ok) {
           const data = await response.json();
@@ -92,7 +101,7 @@ Synthesize a concise, clear knowledge-transfer answer for the research team:`;
           }
         }
       } catch (err) {
-        console.warn('Gemini inference skipped/errored:', err.message);
+        console.warn('Gemini inference skipped or timed out, using instant local synthesis:', err.message);
       }
     }
 
@@ -104,7 +113,7 @@ Synthesize a concise, clear knowledge-transfer answer for the research team:`;
 If your team is exploring a new domain, you can upload your initial literature or findings in the **Add Research** tab to establish the first baseline memory.`;
       } else {
         generatedText = `VAJRA retrieved **${retrievedMemories.length} relevant historical research finding(s)** from previous teams:\n\n`;
-        retrievedMemories.forEach((mem, idx) => {
+        retrievedMemories.forEach((mem) => {
           const isVerified = mem.verificationStatus === 'Verified';
           generatedText += `* **${mem.category}** from **${mem.projectName}** (${mem.teamName}):\n  "${mem.content}"\n  - *Source Document:* \`${mem.documentName || 'Document'}\` (${mem.sourceSection || 'Section'})\n  - *Status:* ${mem.verificationStatus} (${isVerified ? 'Confirmed Result' : 'Preliminary Hypothesis'})\n\n`;
         });
@@ -112,7 +121,14 @@ If your team is exploring a new domain, you can upload your initial literature o
       }
     }
 
-    const userMessage = { id: userMsgId, sender: 'user', timestamp, text: message };
+    const userMessage = {
+      id: userMsgId,
+      sender: 'user',
+      timestamp,
+      text: message,
+      uploadedDocuments: [],
+    };
+
     const vajraMessage = {
       id: vajraMsgId,
       sender: 'vajra',
@@ -136,12 +152,14 @@ If your team is exploring a new domain, you can upload your initial literature o
       },
     };
 
+    // 3. Save to Conversation Session anchored to Project
     if (mongoose.connection.readyState === 1) {
       let conv = await Conversation.findOne({ id: convId });
       if (!conv) {
         await Conversation.create({
           id: convId,
-          userId: 'researcher-user',
+          projectId,
+          userId: req.user?.id || 'usr-default',
           title: message.slice(0, 36) + '...',
           timestamp,
           messages: [userMessage, vajraMessage],
@@ -156,6 +174,7 @@ If your team is exploring a new domain, you can upload your initial literature o
     return res.status(200).json({
       success: true,
       conversationId: convId,
+      projectId,
       userMessage,
       vajraMessage,
     });
@@ -164,13 +183,49 @@ If your team is exploring a new domain, you can upload your initial literature o
   }
 };
 
-export const getConversations = async (req, res) => {
+/**
+ * GET /api/ai/projects/:projectId/chats
+ * Reopen previous chats for a specific project
+ */
+export const getProjectChats = async (req, res) => {
   try {
+    const { projectId } = req.params;
     if (mongoose.connection.readyState === 1) {
-      const convs = await Conversation.find().sort({ updatedAt: -1 });
-      return res.status(200).json(convs);
+      const chats = await Conversation.find({ projectId }).sort({ updatedAt: -1 });
+      return res.status(200).json(chats);
     }
     return res.status(200).json([]);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export const createChat = async (req, res) => {
+  try {
+    const { projectId, title } = req.body;
+    if (!projectId) {
+      return res.status(400).json({ success: false, message: 'projectId is required' });
+    }
+
+    const chatId = `chat-${Date.now().toString(36)}`;
+    const newChat = await Conversation.create({
+      id: chatId,
+      projectId,
+      title: title || 'New Research Consultation',
+      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+      messages: [
+        {
+          id: `msg-${Date.now()}-welcome`,
+          sender: 'vajra',
+          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+          text: `Welcome! This is a dedicated consultation thread for project **${projectId}**.\n\nAsk questions about previous research findings, thermal boundaries, or upload new files here.`,
+          retrievedMemories: [],
+          uploadedDocuments: [],
+        },
+      ],
+    });
+
+    return res.status(201).json(newChat);
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -181,7 +236,7 @@ export const getConversationById = async (req, res) => {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
       const conv = await Conversation.findOne({ id });
-      if (!conv) return res.status(404).json({ success: false, message: 'Not found' });
+      if (!conv) return res.status(404).json({ success: false, message: 'Chat not found' });
       return res.status(200).json(conv);
     }
     return res.status(404).json({ success: false, message: 'Not found' });

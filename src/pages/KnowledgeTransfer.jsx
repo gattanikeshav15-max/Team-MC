@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAppData } from '../context/AppDataContext';
-import axios from 'axios';
+import api from '../services/api';
 import {
   Share2,
   FileText,
@@ -9,11 +9,8 @@ import {
   AlertTriangle,
   Lightbulb,
   HelpCircle,
-  Download,
   Sparkles,
 } from 'lucide-react';
-
-const API_BASE = 'http://localhost:5000/api';
 
 export default function KnowledgeTransfer() {
   const { projects } = useAppData();
@@ -27,7 +24,7 @@ export default function KnowledgeTransfer() {
     setIsGenerating(true);
 
     try {
-      const res = await axios.post(`${API_BASE}/knowledge-transfer/report`, {
+      const res = await api.post('/api/knowledge-transfer/report', {
         targetProjectId: selectedProjectId,
         researchQuery: researchTopic.trim(),
       });
@@ -240,4 +237,3 @@ export default function KnowledgeTransfer() {
     </div>
   );
 }
-

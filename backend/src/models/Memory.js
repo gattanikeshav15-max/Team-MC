@@ -23,6 +23,11 @@ const memorySchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    chatId: {
+      type: String,
+      default: '',
+      index: true,
+    },
     documentId: {
       type: String,
       default: '',

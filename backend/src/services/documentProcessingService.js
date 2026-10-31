@@ -9,13 +9,19 @@ export const documentProcessingService = {
   /**
    * Extract plain text from an uploaded document buffer or file path
    */
-  async extractText(filePath, fileType, originalFilename) {
+  async extractText(fileInput, fileType, originalFilename) {
     try {
-      const ext = path.extname(originalFilename || filePath).toLowerCase();
+      const ext = path.extname(originalFilename || '').toLowerCase();
+      let buffer = null;
+
+      if (Buffer.isBuffer(fileInput)) {
+        buffer = fileInput;
+      } else if (typeof fileInput === 'string' && fs.existsSync(fileInput)) {
+        buffer = fs.readFileSync(fileInput);
+      }
 
       if (ext === '.pdf' || fileType === 'application/pdf') {
-        const dataBuffer = fs.readFileSync(filePath);
-        const data = await pdfParse(dataBuffer);
+        const data = await pdfParse(buffer);
         return data.text || '';
       }
 
@@ -23,21 +29,15 @@ export const documentProcessingService = {
         ext === '.docx' ||
         fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       ) {
-        const result = await mammoth.extractRawText({ path: filePath });
+        const result = await mammoth.extractRawText({ buffer });
         return result.value || '';
       }
 
-      // TXT, CSV, JSON, Markdown
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      return raw || '';
+      // TXT, CSV, JSON
+      return buffer ? buffer.toString('utf-8') : '';
     } catch (err) {
-      console.error(`Document text extraction failed for ${filePath}:`, err.message);
-      // Fallback: Read as UTF-8 string
-      try {
-        return fs.readFileSync(filePath, 'utf-8');
-      } catch {
-        return '';
-      }
+      console.error(`Document text extraction error for ${originalFilename}:`, err.message);
+      return '';
     }
   },
 
@@ -47,7 +47,6 @@ export const documentProcessingService = {
   chunkText(text, maxChunkChars = 1200) {
     if (!text || text.trim().length === 0) return [];
     
-    // Split by double newlines (paragraphs) or markdown headers
     const paragraphs = text.split(/\n\s*\n/);
     const chunks = [];
     let currentChunk = '';
@@ -57,7 +56,6 @@ export const documentProcessingService = {
       const trimmed = para.trim();
       if (!trimmed) continue;
 
-      // Detect header
       if (trimmed.startsWith('#') || trimmed.match(/^[0-9]+\.\s+[A-Z]/)) {
         currentSection = trimmed.slice(0, 50).replace(/[#*]/g, '').trim();
       }

@@ -1,15 +1,16 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useToast } from './ToastContext';
-import axios from 'axios';
+import api from '../services/api';
 
 const AppDataContext = createContext(null);
-
-const API_BASE = 'http://localhost:5000/api';
 
 export function AppDataProvider({ children }) {
   const { showToast } = useToast();
 
   const [projects, setProjects] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [projectChats, setProjectChats] = useState([]);
+  const [activeChatId, setActiveChatId] = useState('');
   const [memories, setMemories] = useState([]);
   const [stats, setStats] = useState({
     totalProjects: 0,
@@ -24,14 +25,14 @@ export function AppDataProvider({ children }) {
     label: 'Connecting to MongoDB...',
   });
 
-  // Fetch initial data from backend
+  // Fetch initial projects and stats
   const refreshData = async () => {
     try {
       const [healthRes, projRes, memRes, statsRes] = await Promise.allSettled([
-        axios.get(`${API_BASE}/health`),
-        axios.get(`${API_BASE}/projects`),
-        axios.get(`${API_BASE}/memory`),
-        axios.get(`${API_BASE}/stats`),
+        api.get('/api/health'),
+        api.get('/api/projects'),
+        api.get('/api/memory'),
+        api.get('/api/stats'),
       ]);
 
       if (healthRes.status === 'fulfilled') {
@@ -42,19 +43,22 @@ export function AppDataProvider({ children }) {
         });
       }
 
-      if (projRes.status === 'fulfilled') {
-        setProjects(projRes.value.data || []);
+      if (projRes.status === 'fulfilled' && Array.isArray(projRes.value.data)) {
+        setProjects(projRes.value.data);
+        if (!selectedProjectId && projRes.value.data.length > 0) {
+          setSelectedProjectId(projRes.value.data[0].id);
+        }
       }
 
-      if (memRes.status === 'fulfilled') {
-        setMemories(memRes.value.data || []);
+      if (memRes.status === 'fulfilled' && Array.isArray(memRes.value.data)) {
+        setMemories(memRes.value.data);
       }
 
       if (statsRes.status === 'fulfilled') {
         setStats(statsRes.value.data);
       }
     } catch (err) {
-      console.warn('Backend sync warning:', err.message);
+      console.warn('Backend sync error:', err.message);
     } finally {
       setIsLoading(false);
     }
@@ -64,11 +68,31 @@ export function AppDataProvider({ children }) {
     refreshData();
   }, []);
 
-  // Add new research project
+  // Sync chats whenever the selected project changes
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    const fetchChats = async () => {
+      try {
+        const res = await api.get(`/api/ai/projects/${selectedProjectId}/chats`);
+        setProjectChats(res.data || []);
+        if (res.data?.length > 0) {
+          setActiveChatId(res.data[0].id);
+        } else {
+          setActiveChatId('');
+        }
+      } catch (err) {
+        console.warn('Error fetching project chats:', err.message);
+      }
+    };
+    fetchChats();
+  }, [selectedProjectId]);
+
+  // Create new project
   const addProject = async (projectData) => {
     try {
-      const res = await axios.post(`${API_BASE}/projects`, projectData);
+      const res = await api.post('/api/projects', projectData);
       setProjects((prev) => [res.data, ...prev]);
+      setSelectedProjectId(res.data.id);
       showToast(`Project "${res.data.name}" created successfully.`, 'success');
       refreshData();
       return res.data;
@@ -78,10 +102,24 @@ export function AppDataProvider({ children }) {
     }
   };
 
+  // Create new chat inside a project
+  const createChat = async (projectId, title) => {
+    try {
+      const res = await api.post('/api/ai/chats', { projectId, title });
+      setProjectChats((prev) => [res.data, ...prev]);
+      setActiveChatId(res.data.id);
+      showToast(`New consultation "${res.data.title}" opened.`, 'success');
+      return res.data;
+    } catch (err) {
+      showToast(`Error creating chat: ${err.message}`, 'error');
+      throw err;
+    }
+  };
+
   // Mark project completed
   const markProjectCompleted = async (projectId) => {
     try {
-      const res = await axios.patch(`${API_BASE}/projects/${projectId}`, {
+      const res = await api.patch(`/api/projects/${projectId}`, {
         status: 'Completed',
       });
       setProjects((prev) =>
@@ -94,14 +132,15 @@ export function AppDataProvider({ children }) {
     }
   };
 
-  // Upload Document & Extract Memories
-  const uploadDocument = async (projectId, file) => {
+  // Upload Document to MongoDB GridFS & Extract Memories
+  const uploadDocument = async (projectId, file, chatId = null) => {
     try {
       const formData = new FormData();
       formData.append('projectId', projectId);
+      if (chatId) formData.append('chatId', chatId);
       formData.append('file', file);
 
-      const res = await axios.post(`${API_BASE}/documents/upload`, formData, {
+      const res = await api.post('/api/documents/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
@@ -117,7 +156,7 @@ export function AppDataProvider({ children }) {
   // Verify memory finding
   const verifyMemory = async (memoryId) => {
     try {
-      const res = await axios.patch(`${API_BASE}/memory/${memoryId}`, {
+      const res = await api.patch(`/api/memory/${memoryId}`, {
         verificationStatus: 'Verified',
       });
       setMemories((prev) =>
@@ -134,12 +173,19 @@ export function AppDataProvider({ children }) {
     <AppDataContext.Provider
       value={{
         projects,
+        selectedProjectId,
+        setSelectedProjectId,
+        projectChats,
+        setProjectChats,
+        activeChatId,
+        setActiveChatId,
         memories,
         stats,
         isLoading,
         backendStatus,
         refreshData,
         addProject,
+        createChat,
         markProjectCompleted,
         uploadDocument,
         verifyMemory,

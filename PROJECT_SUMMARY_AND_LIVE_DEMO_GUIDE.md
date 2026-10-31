@@ -223,3 +223,4 @@ If expanding SiliconSentinel beyond the 24-hour MVP, here are high-impact featur
    * Team-level security scopes ensuring proprietary defense or commercial IP is only accessible to authorized project members.
 5. **Multi-Modal Image Extraction**:
    * Extracting schematic diagrams, oscilloscope waveform captures, and SEM electron microscope imagery directly into visual memory nodes.
+

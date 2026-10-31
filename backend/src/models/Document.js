@@ -15,6 +15,15 @@ const documentSchema = new mongoose.Schema(
       ref: 'Project',
       index: true,
     },
+    chatId: {
+      type: String,
+      default: '',
+      index: true,
+    },
+    uploadedBy: {
+      type: String,
+      default: 'researcher',
+    },
     originalFilename: {
       type: String,
       required: true,
@@ -27,9 +36,18 @@ const documentSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    storageType: {
+      type: String,
+      enum: ['gridfs', 'disk'],
+      default: 'gridfs',
+    },
+    gridfsFileId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
     storagePath: {
       type: String,
-      required: true,
+      default: '',
     },
     processingStatus: {
       type: String,
@@ -52,4 +70,3 @@ const documentSchema = new mongoose.Schema(
 
 export const Document = mongoose.model('Document', documentSchema);
 export default Document;
-

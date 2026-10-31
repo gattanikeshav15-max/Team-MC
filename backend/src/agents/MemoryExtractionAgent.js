@@ -1,26 +1,23 @@
 import Memory from '../models/Memory.js';
 import Project from '../models/Project.js';
 import Document from '../models/Document.js';
+import Conversation from '../models/Conversation.js';
 import embeddingService from '../services/embeddingService.js';
 import documentProcessingService from '../services/documentProcessingService.js';
 import mongoose from 'mongoose';
 
-const VALID_CATEGORIES = [
-  'Research Objective',
-  'Observation',
-  'Successful Experiment',
-  'Failed Experiment',
-  'Engineering Decision',
-  'Technical Limitation',
-  'Lesson Learned',
-  'Unresolved Question',
-];
-
 export class MemoryExtractionAgent {
   /**
-   * Extract research memories from an uploaded document
+   * Extract research memories from an uploaded document buffer or path
    */
-  static async extractFromDocument({ documentId, filePath, fileType, originalFilename, projectId }) {
+  static async extractFromDocument({
+    documentId,
+    fileBuffer,
+    fileType,
+    originalFilename,
+    projectId,
+    chatId = null,
+  }) {
     // 1. Fetch Project Details
     let project = null;
     if (mongoose.connection.readyState === 1) {
@@ -30,8 +27,8 @@ export class MemoryExtractionAgent {
     const projectName = project ? project.name : 'Semiconductor Research';
     const teamName = project ? project.teamName : 'Team Alpha';
 
-    // 2. Extract Plain Text from File
-    const fullText = await documentProcessingService.extractText(filePath, fileType, originalFilename);
+    // 2. Extract Plain Text
+    const fullText = await documentProcessingService.extractText(fileBuffer, fileType, originalFilename);
     const chunks = documentProcessingService.chunkText(fullText);
 
     const extractedMemories = [];
@@ -44,7 +41,7 @@ export class MemoryExtractionAgent {
       for (const finding of findings) {
         const memoryId = `MEM-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
 
-        // Generate vector embedding for semantic search
+        // Generate vector embedding
         const { embedding } = await embeddingService.generateEmbedding(
           `${finding.category}: ${finding.content} | Context: ${projectName} ${teamName}`
         );
@@ -54,6 +51,7 @@ export class MemoryExtractionAgent {
           projectId,
           projectName,
           teamName,
+          chatId: chatId || '',
           documentId,
           documentName: originalFilename,
           category: finding.category,
@@ -76,7 +74,7 @@ export class MemoryExtractionAgent {
       }
     }
 
-    // 4. Update Document extracted count and status
+    // 4. Update Document extracted count
     if (mongoose.connection.readyState === 1) {
       await Document.findOneAndUpdate(
         { id: documentId },
@@ -85,6 +83,25 @@ export class MemoryExtractionAgent {
           extractedMemoriesCount: extractedMemories.length,
         }
       );
+
+      // If document was uploaded inside a chat, register it in the chat session
+      if (chatId) {
+        await Conversation.findOneAndUpdate(
+          { id: chatId },
+          {
+            $push: {
+              'messages.$[last].uploadedDocuments': {
+                id: documentId,
+                filename: originalFilename,
+                extractedCount: extractedMemories.length,
+              },
+            },
+          },
+          {
+            arrayFilters: [{ 'last.id': { $exists: true } }],
+          }
+        );
+      }
     }
 
     return extractedMemories;
@@ -96,7 +113,7 @@ export class MemoryExtractionAgent {
   static classifyChunkContent(text, defaultSection = 'Research Summary') {
     const findings = [];
     const lower = text.toLowerCase();
-    const sentences = text.split(/(?<=[.?!])\s+/).filter((s) => s.trim().length > 30);
+    const sentences = text.split(/(?<=[.?!])\s+/).filter((s) => s.trim().length > 25);
 
     for (const sent of sentences) {
       const sLower = sent.toLowerCase();
@@ -190,7 +207,6 @@ export class MemoryExtractionAgent {
       }
     }
 
-    // If no specific patterns triggered, extract top sentence as Observation
     if (findings.length === 0 && sentences.length > 0) {
       findings.push({
         category: 'Observation',
@@ -199,7 +215,7 @@ export class MemoryExtractionAgent {
       });
     }
 
-    return findings.slice(0, 5); // Limit per chunk to prevent clutter
+    return findings.slice(0, 5);
   }
 }
 

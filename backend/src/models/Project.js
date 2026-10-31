@@ -38,6 +38,15 @@ const projectSchema = new mongoose.Schema(
       type: String,
       default: 'Dr. Keshav Gattani',
     },
+    ownerId: {
+      type: String,
+      default: 'usr-default',
+      index: true,
+    },
+    isShared: {
+      type: Boolean,
+      default: true, // Allow cross-project knowledge retrieval by default for authorized teams
+    },
     createdDate: {
       type: String,
       default: () => new Date().toISOString().split('T')[0],
@@ -58,4 +67,3 @@ const projectSchema = new mongoose.Schema(
 
 export const Project = mongoose.model('Project', projectSchema);
 export default Project;
-
